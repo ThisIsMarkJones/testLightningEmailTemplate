@@ -1,0 +1,36 @@
+<template>
+    <lightning-card title="Send Test Email" icon-name="standard:email">
+        <div class="slds-var-m-around_medium">
+            <lightning-combobox
+                label="Select Email Template"
+                value={selectedTemplateId}
+                options={emailTemplateOptions}
+                onchange={handleTemplateChange}>
+            </lightning-combobox>
+
+            <lightning-combobox
+                label="Select Record"
+                value={selectedRecordId}
+                options={recordOptions}
+                onchange={handleRecordChange}>
+            </lightning-combobox>
+
+            <lightning-input
+                label="Recipient Email Address"
+                value={recipientEmail}
+                onchange={handleEmailChange}
+                class="custom-spacing">
+            </lightning-input>
+
+            <lightning-button
+                label="Send Email"
+                variant="brand"
+                onclick={handleSendEmail}>
+            </lightning-button>
+        </div>
+
+        <template if:true={error}>
+            <div class="slds-text-color_error">{error}</div>
+        </template>
+    </lightning-card>
+</template>
