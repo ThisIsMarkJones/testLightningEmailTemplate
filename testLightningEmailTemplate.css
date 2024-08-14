@@ -1,0 +1,7 @@
+.custom-margin-medium {
+    margin: var(--lwc-varSpacingMedium, spacingMedium);
+}
+
+.custom-spacing {
+    margin-bottom: 10px;
+}
