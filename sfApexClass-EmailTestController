@@ -3,7 +3,7 @@ public with sharing class EmailTestController {
     @AuraEnabled(cacheable=true)
     public static List<OptionWrapper> getEmailTemplates() {
         List<OptionWrapper> options = new List<OptionWrapper>();
-        List<EmailTemplate> templates = [SELECT Id, Name, RelatedEntityType FROM EmailTemplate WHERE IsActive = TRUE];
+        List<EmailTemplate> templates = [SELECT Id, Name, RelatedEntityType FROM EmailTemplate WHERE IsActive = TRUE AND UiType = 'SFX'];
      
         for (EmailTemplate template : templates) {
             options.add(new OptionWrapper(template.Id, template.Name));
