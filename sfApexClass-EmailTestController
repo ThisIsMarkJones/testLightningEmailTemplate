@@ -1,0 +1,68 @@
+public with sharing class EmailTestController {
+ 
+    @AuraEnabled(cacheable=true)
+    public static List<OptionWrapper> getEmailTemplates() {
+        List<OptionWrapper> options = new List<OptionWrapper>();
+        List<EmailTemplate> templates = [SELECT Id, Name, RelatedEntityType FROM EmailTemplate WHERE IsActive = TRUE];
+     
+        for (EmailTemplate template : templates) {
+            options.add(new OptionWrapper(template.Id, template.Name));
+        }
+     
+        return options;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static String getTargetObjectType(Id templateId) {
+        EmailTemplate template = [SELECT Id, RelatedEntityType FROM EmailTemplate WHERE Id = :templateId LIMIT 1];
+        return template.RelatedEntityType;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static List<OptionWrapper> getRecords(String objectType) {
+        String query = 'SELECT Id, Name FROM ' + objectType + ' LIMIT 100';
+        List<SObject> records = Database.query(query);
+     
+        List<OptionWrapper> options = new List<OptionWrapper>();
+        for (SObject record : records) {
+            options.add(new OptionWrapper((String)record.get('Id'), (String)record.get('Name')));
+        }
+     
+        return options;
+    }
+
+    @AuraEnabled
+    public static void sendTestEmail(Id templateId, Id recordId, String recipientEmail) {
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setTemplateId(templateId);
+
+        // Determine the SObject type of the record
+        String sObjectType = recordId.getSObjectType().getDescribe().getName();
+        
+        if (sObjectType == 'Contact' || sObjectType == 'Lead' || sObjectType == 'User') {
+            mail.setTargetObjectId(recordId);
+        } else {
+            // Fetch a Contact based on the recipient email to use as TargetObjectId
+            Id targetObjectId;
+            try {
+                targetObjectId = [SELECT Id FROM Contact WHERE Email = :recipientEmail LIMIT 1].Id;
+            } catch (Exception e) {
+                throw new AuraHandledException('A valid Contact with the given email address is required.');
+            }
+
+            if (targetObjectId != null) {
+                mail.setTargetObjectId(targetObjectId);
+            } else {
+                throw new AuraHandledException('A valid Contact with the given email address is required.');
+            }
+
+            // Set WhatId for non-Contact/Lead/User records
+            mail.setWhatId(recordId);
+        }
+
+        mail.setToAddresses(new String[] { recipientEmail });
+        mail.setSaveAsActivity(false);
+     
+        Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+    }
+}
