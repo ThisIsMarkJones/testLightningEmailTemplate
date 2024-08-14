@@ -5,3 +5,7 @@
 .custom-spacing {
     margin-bottom: 10px;
 }
+
+.custom-error-padding {
+    padding-left: var(--slds-border_left, var(--lwc-squareIconUtilityMedium, 1rem)); /* Adds 1rem padding to the left. */
+}
