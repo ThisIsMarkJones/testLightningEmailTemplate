@@ -71,13 +71,24 @@ export default class TestLightningEmailTemplate extends LightningElement {
                 recipientEmail: this.recipientEmail
             })
                 .then(() => {
-                    this.error = 'Email sent successfully';
+                    this.error = 'Email sent successfully.';
+
+                    // Delay the reset of fields for 3 seconds
+                    setTimeout(() => {
+                        this.selectedTemplateId = null;
+                        this.selectedRecordId = null;
+                        this.recipientEmail = '';
+                        this.recordOptions = [];
+
+                        // Optionally, refresh the email template options or reset other states
+                        this.loadEmailTemplates();
+                    }, 3000); // 3000 ms = 3 seconds
                 })
                 .catch(error => {
                     this.error = error.body.message;
                 });
         } else {
-            this.error = 'Please fill out all fields';
+            this.error = 'Please fill out all fields.';
         }
     }
 }
