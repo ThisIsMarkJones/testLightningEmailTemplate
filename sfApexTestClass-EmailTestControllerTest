@@ -1,55 +1,241 @@
-@isTest
-public class EmailTestControllerTest {
+@IsTest
+private class EmailTestControllerTest {
+
+    private static final String CONTACT_EMAIL = 'test@email.com';
+    private static final String MISSING_EMAIL = 'missing@email.com';
 
     @testSetup
     static void setupTestData() {
-        // Create a test Contact
-        Contact testContact = new Contact(FirstName = 'Test', LastName = 'Contact', Email = 'test@email.com');
+        Contact testContact = new Contact(
+            FirstName = 'Test',
+            LastName = 'Contact',
+            Email = CONTACT_EMAIL
+        );
         insert testContact;
 
-        // Create a test Account and Opportunity
         Account testAccount = new Account(Name = 'Test Account');
         insert testAccount;
-        
-        Opportunity testOpportunity = new Opportunity(Name = 'Test Opportunity', StageName = 'Prospecting', CloseDate = Date.today(), AccountId = testAccount.Id);
+
+        Opportunity testOpportunity = new Opportunity(
+            Name = 'Test Opportunity',
+            StageName = 'Prospecting',
+            CloseDate = Date.today().addDays(30),
+            AccountId = testAccount.Id
+        );
         insert testOpportunity;
 
-        // Create a simple email template
-        User user = [SELECT Id FROM User WHERE IsActive = true LIMIT 1];
-        System.runAs(user) {
-            EmailTemplate testTemplate = new EmailTemplate(
-                Name = 'Simple Test Template',
-                DeveloperName = 'Simple_Test_Template',
-                Subject = 'Test Email',
-                HtmlValue = '<html><body>Dear {!Contact.FirstName},</body></html>',
+        Case testCase = new Case(
+            Subject = 'Test Case Subject',
+            Status = 'New',
+            Origin = 'Phone',
+            ContactId = testContact.Id,
+            AccountId = testAccount.Id
+        );
+        insert testCase;
+
+        User runAsUser = [SELECT Id FROM User WHERE IsActive = true LIMIT 1];
+
+        System.runAs(runAsUser) {
+            insert new EmailTemplate(
+                Name = 'Contact Lightning Template',
+                DeveloperName = 'Contact_Lightning_Template',
+                Subject = 'Hello {!Contact.FirstName}',
+                HtmlValue = '<html><body>Hello {!Contact.FirstName}</body></html>',
                 FolderId = UserInfo.getUserId(),
-                TemplateType = 'text',
+                TemplateType = 'custom',
+                UiType = 'SFX',
+                RelatedEntityType = 'Contact',
                 IsActive = true
             );
-            insert testTemplate;
+
+            insert new EmailTemplate(
+                Name = 'Case Lightning Template',
+                DeveloperName = 'Case_Lightning_Template',
+                Subject = 'Case {!Case.CaseNumber}',
+                HtmlValue = '<html><body>Case {!Case.CaseNumber}</body></html>',
+                FolderId = UserInfo.getUserId(),
+                TemplateType = 'custom',
+                UiType = 'SFX',
+                RelatedEntityType = 'Case',
+                IsActive = true
+            );
         }
     }
 
-    @isTest
+    @IsTest
     static void testGetEmailTemplates() {
         Test.startTest();
         List<OptionWrapper> templates = EmailTestController.getEmailTemplates();
         Test.stopTest();
-        
-        System.assertNotEquals(0, templates.size(), 'Email Templates should be returned');
+
+        System.assertNotEquals(null, templates, 'Templates list should not be null.');
+        System.assert(templates.size() >= 2, 'Expected Lightning email templates to be returned.');
+
+        Set<String> labels = new Set<String>();
+        for (OptionWrapper item : templates) {
+            labels.add(item.label);
+        }
+
+        System.assert(labels.contains('Contact Lightning Template'),
+            'Contact template should be returned.');
+        System.assert(labels.contains('Case Lightning Template'),
+            'Case template should be returned.');
     }
 
-    @isTest
-    static void testSendTestEmailToContact() {
-        EmailTemplate template = [SELECT Id FROM EmailTemplate WHERE DeveloperName = 'Simple_Test_Template' LIMIT 1];
-        Contact contact = [SELECT Id, Email FROM Contact WHERE Email = 'test@email.com' LIMIT 1];
+    @IsTest
+    static void testGetTargetObjectTypeForCaseTemplate() {
+        EmailTemplate caseTemplate = [
+            SELECT Id, RelatedEntityType
+            FROM EmailTemplate
+            WHERE DeveloperName = 'Case_Lightning_Template'
+            LIMIT 1
+        ];
+
+        Test.startTest();
+        String relatedType = EmailTestController.getTargetObjectType(caseTemplate.Id);
+        Test.stopTest();
+
+        System.assertEquals('Case', relatedType,
+            'RelatedEntityType should be Case.');
+    }
+
+    @IsTest
+    static void testGetRecordsForOpportunityUsesName() {
+        Test.startTest();
+        List<OptionWrapper> records = EmailTestController.getRecords('Opportunity');
+        Test.stopTest();
+
+        System.assertNotEquals(0, records.size(), 'Opportunity records should be returned.');
+        System.assertEquals('Test Opportunity', records[0].label,
+            'Opportunity should use Name as the display label.');
+    }
+
+    @IsTest
+    static void testGetRecordsForCaseUsesCaseNumber() {
+        Case existingCase = [
+            SELECT Id, CaseNumber
+            FROM Case
+            LIMIT 1
+        ];
+
+        Test.startTest();
+        List<OptionWrapper> records = EmailTestController.getRecords('Case');
+        Test.stopTest();
+
+        System.assertNotEquals(0, records.size(), 'Case records should be returned.');
+        System.assertEquals(existingCase.CaseNumber, records[0].label,
+            'Case should use CaseNumber as the display label.');
+    }
+
+    @IsTest
+    static void testGetRecordsUnsupportedObjectThrowsHandledException() {
+        Boolean exceptionThrown = false;
 
         Test.startTest();
         try {
-            EmailTestController.sendTestEmail(template.Id, contact.Id, contact.Email);
-        } catch (Exception e) {
-            System.assert(false, 'No exceptions should be thrown when sending email to Contact.');
+            EmailTestController.getRecords('DefinitelyNotAnObject');
+        } catch (AuraHandledException ex) {
+            exceptionThrown = true;
+            System.assert(ex.getMessage().contains('Unsupported object type'),
+                'Expected unsupported object type message.');
         }
         Test.stopTest();
+
+        System.assertEquals(true, exceptionThrown,
+            'An AuraHandledException should have been thrown.');
+    }
+
+    @IsTest
+    static void testSendTestEmailToContactRecord() {
+        EmailTemplate contactTemplate = [
+            SELECT Id
+            FROM EmailTemplate
+            WHERE DeveloperName = 'Contact_Lightning_Template'
+            LIMIT 1
+        ];
+
+        Contact testContact = [
+            SELECT Id, Email
+            FROM Contact
+            WHERE Email = :CONTACT_EMAIL
+            LIMIT 1
+        ];
+
+        Test.startTest();
+        EmailTestController.sendTestEmail(
+            contactTemplate.Id,
+            testContact.Id,
+            testContact.Email
+        );
+        Integer emailInvocations = Limits.getEmailInvocations();
+        Test.stopTest();
+
+        System.assertEquals(1, emailInvocations,
+            'One email invocation should occur for Contact send.');
+    }
+
+    @IsTest
+    static void testSendTestEmailToCaseRecord() {
+        EmailTemplate caseTemplate = [
+            SELECT Id
+            FROM EmailTemplate
+            WHERE DeveloperName = 'Case_Lightning_Template'
+            LIMIT 1
+        ];
+
+        Case testCase = [
+            SELECT Id
+            FROM Case
+            LIMIT 1
+        ];
+
+        Test.startTest();
+        EmailTestController.sendTestEmail(
+            caseTemplate.Id,
+            testCase.Id,
+            CONTACT_EMAIL
+        );
+        Integer emailInvocations = Limits.getEmailInvocations();
+        Test.stopTest();
+
+        System.assertEquals(1, emailInvocations,
+            'One email invocation should occur for Case send.');
+    }
+
+    @IsTest
+    static void testSendTestEmailToCaseWithoutMatchingContactThrowsHandledException() {
+        EmailTemplate caseTemplate = [
+            SELECT Id
+            FROM EmailTemplate
+            WHERE DeveloperName = 'Case_Lightning_Template'
+            LIMIT 1
+        ];
+
+        Case testCase = [
+            SELECT Id
+            FROM Case
+            LIMIT 1
+        ];
+
+        Boolean exceptionThrown = false;
+
+        Test.startTest();
+        try {
+            EmailTestController.sendTestEmail(
+                caseTemplate.Id,
+                testCase.Id,
+                MISSING_EMAIL
+            );
+        } catch (AuraHandledException ex) {
+            exceptionThrown = true;
+            System.assert(
+                ex.getMessage().contains('A valid Contact with the given email address is required'),
+                'Expected missing Contact message.'
+            );
+        }
+        Test.stopTest();
+
+        System.assertEquals(true, exceptionThrown,
+            'An AuraHandledException should be thrown when no matching Contact exists.');
     }
 }
