@@ -1,68 +1,161 @@
 public with sharing class EmailTestController {
- 
+
     @AuraEnabled(cacheable=true)
     public static List<OptionWrapper> getEmailTemplates() {
         List<OptionWrapper> options = new List<OptionWrapper>();
-        List<EmailTemplate> templates = [SELECT Id, Name, RelatedEntityType FROM EmailTemplate WHERE IsActive = TRUE AND UiType = 'SFX'];
-     
-        for (EmailTemplate template : templates) {
-            options.add(new OptionWrapper(template.Id, template.Name));
+
+        for (EmailTemplate templateRecord : [
+            SELECT Id, Name, RelatedEntityType
+            FROM EmailTemplate
+            WHERE IsActive = TRUE
+            AND UiType = 'SFX'
+            ORDER BY Name
+        ]) {
+            options.add(new OptionWrapper(
+                (String)templateRecord.Id,
+                templateRecord.Name
+            ));
         }
-     
+
         return options;
     }
 
     @AuraEnabled(cacheable=true)
     public static String getTargetObjectType(Id templateId) {
-        EmailTemplate template = [SELECT Id, RelatedEntityType FROM EmailTemplate WHERE Id = :templateId LIMIT 1];
-        return template.RelatedEntityType;
+        if (templateId == null) {
+            throw new AuraHandledException('Template Id is required.');
+        }
+
+        EmailTemplate templateRecord = [
+            SELECT Id, RelatedEntityType
+            FROM EmailTemplate
+            WHERE Id = :templateId
+            LIMIT 1
+        ];
+
+        return templateRecord.RelatedEntityType;
     }
 
     @AuraEnabled(cacheable=true)
     public static List<OptionWrapper> getRecords(String objectType) {
-        String query = 'SELECT Id, Name FROM ' + objectType + ' LIMIT 100';
-        List<SObject> records = Database.query(query);
-     
-        List<OptionWrapper> options = new List<OptionWrapper>();
-        for (SObject record : records) {
-            options.add(new OptionWrapper((String)record.get('Id'), (String)record.get('Name')));
+        if (String.isBlank(objectType)) {
+            throw new AuraHandledException('Object type is required.');
         }
-     
+
+        Map<String, Schema.SObjectType> globalDescribe = Schema.getGlobalDescribe();
+        if (!globalDescribe.containsKey(objectType)) {
+            throw new AuraHandledException('Unsupported object type: ' + objectType);
+        }
+
+        Schema.DescribeSObjectResult describeResult =
+            globalDescribe.get(objectType).getDescribe();
+
+        Map<String, Schema.SObjectField> fieldMap = describeResult.fields.getMap();
+        String labelField = getDisplayField(objectType, fieldMap);
+
+        String soql =
+            'SELECT Id, ' + labelField +
+            ' FROM ' + objectType +
+            ' ORDER BY CreatedDate DESC LIMIT 100';
+
+        List<SObject> records = Database.query(soql);
+        List<OptionWrapper> options = new List<OptionWrapper>();
+
+        for (SObject recordItem : records) {
+            String labelValue = getDisplayValue(recordItem, labelField, objectType);
+            options.add(new OptionWrapper(
+                (String)recordItem.get('Id'),
+                labelValue
+            ));
+        }
+
         return options;
     }
 
     @AuraEnabled
     public static void sendTestEmail(Id templateId, Id recordId, String recipientEmail) {
+        if (templateId == null) {
+            throw new AuraHandledException('Template Id is required.');
+        }
+        if (recordId == null) {
+            throw new AuraHandledException('Record Id is required.');
+        }
+        if (String.isBlank(recipientEmail)) {
+            throw new AuraHandledException('Recipient email is required.');
+        }
+
         Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
         mail.setTemplateId(templateId);
+        mail.setToAddresses(new String[] { recipientEmail });
+        mail.setSaveAsActivity(false);
 
-        // Determine the SObject type of the record
-        String sObjectType = recordId.getSObjectType().getDescribe().getName();
-        
-        if (sObjectType == 'Contact' || sObjectType == 'Lead' || sObjectType == 'User') {
+        // Use the target object only as merge context, not as the actual recipient.
+        mail.setTreatTargetObjectAsRecipient(false);
+
+        String sObjectTypeName = recordId.getSObjectType().getDescribe().getName();
+
+        if (sObjectTypeName == 'Contact' || sObjectTypeName == 'Lead' || sObjectTypeName == 'User') {
             mail.setTargetObjectId(recordId);
         } else {
-            // Fetch a Contact based on the recipient email to use as TargetObjectId
-            Id targetObjectId;
+            Contact recipientContact;
             try {
-                targetObjectId = [SELECT Id FROM Contact WHERE Email = :recipientEmail LIMIT 1].Id;
-            } catch (Exception e) {
-                throw new AuraHandledException('A valid Contact with the given email address is required.');
+                recipientContact = [
+                    SELECT Id
+                    FROM Contact
+                    WHERE Email = :recipientEmail
+                    LIMIT 1
+                ];
+            } catch (Exception ex) {
+                throw new AuraHandledException(
+                    'A valid Contact with the given email address is required for this template.'
+                );
             }
 
-            if (targetObjectId != null) {
-                mail.setTargetObjectId(targetObjectId);
-            } else {
-                throw new AuraHandledException('A valid Contact with the given email address is required.');
+            if (recipientContact == null) {
+                throw new AuraHandledException(
+                    'A valid Contact with the given email address is required for this template.'
+                );
             }
 
-            // Set WhatId for non-Contact/Lead/User records
+            mail.setTargetObjectId(recipientContact.Id);
             mail.setWhatId(recordId);
         }
 
-        mail.setToAddresses(new String[] { recipientEmail });
-        mail.setSaveAsActivity(false);
-     
         Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
+    }
+
+    private static String getDisplayField(
+        String objectType,
+        Map<String, Schema.SObjectField> fieldMap
+    ) {
+        if (fieldMap.containsKey('Name')) {
+            return 'Name';
+        }
+
+        if (objectType == 'Case' && fieldMap.containsKey('CaseNumber')) {
+            return 'CaseNumber';
+        }
+
+        if (fieldMap.containsKey('Subject')) {
+            return 'Subject';
+        }
+
+        if (fieldMap.containsKey('DeveloperName')) {
+            return 'DeveloperName';
+        }
+
+        throw new AuraHandledException(
+            'No supported display field was found for object type ' + objectType + '.'
+        );
+    }
+
+    private static String getDisplayValue(SObject recordItem, String labelField, String objectType) {
+        Object rawValue = recordItem.get(labelField);
+
+        if (rawValue != null) {
+            return String.valueOf(rawValue);
+        }
+
+        return objectType + ' - ' + String.valueOf(recordItem.get('Id'));
     }
 }
