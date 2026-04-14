@@ -12,7 +12,7 @@ public with sharing class EmailTestController {
             ORDER BY Name
         ]) {
             options.add(new OptionWrapper(
-                (String)templateRecord.Id,
+                (String) templateRecord.Id,
                 templateRecord.Name
             ));
         }
@@ -64,7 +64,7 @@ public with sharing class EmailTestController {
         for (SObject recordItem : records) {
             String labelValue = getDisplayValue(recordItem, labelField, objectType);
             options.add(new OptionWrapper(
-                (String)recordItem.get('Id'),
+                (String) recordItem.get('Id'),
                 labelValue
             ));
         }
@@ -88,37 +88,32 @@ public with sharing class EmailTestController {
         mail.setTemplateId(templateId);
         mail.setToAddresses(new String[] { recipientEmail });
         mail.setSaveAsActivity(false);
-
-        // Use the target object only as merge context, not as the actual recipient.
         mail.setTreatTargetObjectAsRecipient(false);
 
         String sObjectTypeName = recordId.getSObjectType().getDescribe().getName();
 
         if (sObjectTypeName == 'Contact' || sObjectTypeName == 'Lead' || sObjectTypeName == 'User') {
             mail.setTargetObjectId(recordId);
+        } else if (sObjectTypeName == 'Case') {
+            Case caseRecord = [
+                SELECT Id, ContactId
+                FROM Case
+                WHERE Id = :recordId
+                LIMIT 1
+            ];
+
+            if (caseRecord.ContactId == null) {
+                throw new AuraHandledException(
+                    'The selected Case does not have a Contact. A Contact is required to render this email template for testing.'
+                );
+            }
+
+            mail.setTargetObjectId(caseRecord.ContactId);
+            mail.setWhatId(caseRecord.Id);
         } else {
-            Contact recipientContact;
-            try {
-                recipientContact = [
-                    SELECT Id
-                    FROM Contact
-                    WHERE Email = :recipientEmail
-                    LIMIT 1
-                ];
-            } catch (Exception ex) {
-                throw new AuraHandledException(
-                    'A valid Contact with the given email address is required for this template.'
-                );
-            }
-
-            if (recipientContact == null) {
-                throw new AuraHandledException(
-                    'A valid Contact with the given email address is required for this template.'
-                );
-            }
-
-            mail.setTargetObjectId(recipientContact.Id);
-            mail.setWhatId(recordId);
+            throw new AuraHandledException(
+                'Testing is currently supported only for Contact, Lead, User, and Case-related templates.'
+            );
         }
 
         Messaging.sendEmail(new Messaging.SingleEmailMessage[] { mail });
