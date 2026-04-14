@@ -2,7 +2,7 @@
 private class EmailTestControllerTest {
 
     private static final String CONTACT_EMAIL = 'test@email.com';
-    private static final String MISSING_EMAIL = 'missing@email.com';
+    private static final String REVIEW_EMAIL = 'reviewer@company.com';
 
     @testSetup
     static void setupTestData() {
@@ -32,6 +32,14 @@ private class EmailTestControllerTest {
             AccountId = testAccount.Id
         );
         insert testCase;
+
+        Case caseWithoutContact = new Case(
+            Subject = 'Case Without Contact',
+            Status = 'New',
+            Origin = 'Email',
+            AccountId = testAccount.Id
+        );
+        insert caseWithoutContact;
 
         User runAsUser = [SELECT Id FROM User WHERE IsActive = true LIMIT 1];
 
@@ -76,10 +84,14 @@ private class EmailTestControllerTest {
             labels.add(item.label);
         }
 
-        System.assert(labels.contains('Contact Lightning Template'),
-            'Contact template should be returned.');
-        System.assert(labels.contains('Case Lightning Template'),
-            'Case template should be returned.');
+        System.assert(
+            labels.contains('Contact Lightning Template'),
+            'Contact template should be returned.'
+        );
+        System.assert(
+            labels.contains('Case Lightning Template'),
+            'Case template should be returned.'
+        );
     }
 
     @IsTest
@@ -95,8 +107,11 @@ private class EmailTestControllerTest {
         String relatedType = EmailTestController.getTargetObjectType(caseTemplate.Id);
         Test.stopTest();
 
-        System.assertEquals('Case', relatedType,
-            'RelatedEntityType should be Case.');
+        System.assertEquals(
+            'Case',
+            relatedType,
+            'RelatedEntityType should be Case.'
+        );
     }
 
     @IsTest
@@ -106,8 +121,11 @@ private class EmailTestControllerTest {
         Test.stopTest();
 
         System.assertNotEquals(0, records.size(), 'Opportunity records should be returned.');
-        System.assertEquals('Test Opportunity', records[0].label,
-            'Opportunity should use Name as the display label.');
+        System.assertEquals(
+            'Test Opportunity',
+            records[0].label,
+            'Opportunity should use Name as the display label.'
+        );
     }
 
     @IsTest
@@ -115,6 +133,7 @@ private class EmailTestControllerTest {
         Case existingCase = [
             SELECT Id, CaseNumber
             FROM Case
+            WHERE Subject = 'Test Case Subject'
             LIMIT 1
         ];
 
@@ -123,8 +142,24 @@ private class EmailTestControllerTest {
         Test.stopTest();
 
         System.assertNotEquals(0, records.size(), 'Case records should be returned.');
-        System.assertEquals(existingCase.CaseNumber, records[0].label,
-            'Case should use CaseNumber as the display label.');
+
+        Boolean foundMatchingCase = false;
+        for (OptionWrapper recordOption : records) {
+            if (recordOption.value == existingCase.Id) {
+                foundMatchingCase = true;
+                System.assertEquals(
+                    existingCase.CaseNumber,
+                    recordOption.label,
+                    'Case should use CaseNumber as the display label.'
+                );
+            }
+        }
+
+        System.assertEquals(
+            true,
+            foundMatchingCase,
+            'The expected Case should be present in the returned options.'
+        );
     }
 
     @IsTest
@@ -136,13 +171,18 @@ private class EmailTestControllerTest {
             EmailTestController.getRecords('DefinitelyNotAnObject');
         } catch (AuraHandledException ex) {
             exceptionThrown = true;
-            System.assert(ex.getMessage().contains('Unsupported object type'),
-                'Expected unsupported object type message.');
+            System.assert(
+                ex.getMessage().contains('Unsupported object type'),
+                'Expected unsupported object type message.'
+            );
         }
         Test.stopTest();
 
-        System.assertEquals(true, exceptionThrown,
-            'An AuraHandledException should have been thrown.');
+        System.assertEquals(
+            true,
+            exceptionThrown,
+            'An AuraHandledException should have been thrown.'
+        );
     }
 
     @IsTest
@@ -170,12 +210,15 @@ private class EmailTestControllerTest {
         Integer emailInvocations = Limits.getEmailInvocations();
         Test.stopTest();
 
-        System.assertEquals(1, emailInvocations,
-            'One email invocation should occur for Contact send.');
+        System.assertEquals(
+            1,
+            emailInvocations,
+            'One email invocation should occur for Contact send.'
+        );
     }
 
     @IsTest
-    static void testSendTestEmailToCaseRecord() {
+    static void testSendTestEmailToCaseRecordAllowsReviewerEmail() {
         EmailTemplate caseTemplate = [
             SELECT Id
             FROM EmailTemplate
@@ -186,6 +229,7 @@ private class EmailTestControllerTest {
         Case testCase = [
             SELECT Id
             FROM Case
+            WHERE Subject = 'Test Case Subject'
             LIMIT 1
         ];
 
@@ -193,17 +237,20 @@ private class EmailTestControllerTest {
         EmailTestController.sendTestEmail(
             caseTemplate.Id,
             testCase.Id,
-            CONTACT_EMAIL
+            REVIEW_EMAIL
         );
         Integer emailInvocations = Limits.getEmailInvocations();
         Test.stopTest();
 
-        System.assertEquals(1, emailInvocations,
-            'One email invocation should occur for Case send.');
+        System.assertEquals(
+            1,
+            emailInvocations,
+            'One email invocation should occur for Case send to a reviewer email.'
+        );
     }
 
     @IsTest
-    static void testSendTestEmailToCaseWithoutMatchingContactThrowsHandledException() {
+    static void testSendTestEmailToCaseWithoutContactThrowsHandledException() {
         EmailTemplate caseTemplate = [
             SELECT Id
             FROM EmailTemplate
@@ -211,9 +258,10 @@ private class EmailTestControllerTest {
             LIMIT 1
         ];
 
-        Case testCase = [
+        Case caseWithoutContact = [
             SELECT Id
             FROM Case
+            WHERE Subject = 'Case Without Contact'
             LIMIT 1
         ];
 
@@ -223,19 +271,22 @@ private class EmailTestControllerTest {
         try {
             EmailTestController.sendTestEmail(
                 caseTemplate.Id,
-                testCase.Id,
-                MISSING_EMAIL
+                caseWithoutContact.Id,
+                REVIEW_EMAIL
             );
         } catch (AuraHandledException ex) {
             exceptionThrown = true;
             System.assert(
-                ex.getMessage().contains('A valid Contact with the given email address is required'),
-                'Expected missing Contact message.'
+                ex.getMessage().contains('does not have a Contact'),
+                'Expected missing Case Contact message.'
             );
         }
         Test.stopTest();
 
-        System.assertEquals(true, exceptionThrown,
-            'An AuraHandledException should be thrown when no matching Contact exists.');
+        System.assertEquals(
+            true,
+            exceptionThrown,
+            'An AuraHandledException should be thrown when the Case has no Contact.'
+        );
     }
 }
