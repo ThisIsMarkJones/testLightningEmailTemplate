@@ -2,86 +2,102 @@
 private class EmailTestControllerTest {
 
     private static final String CONTACT_EMAIL = 'test@email.com';
-    private static final String REVIEW_EMAIL = 'reviewer@company.com';
+    private static final String MISSING_EMAIL = 'missing@email.com';
 
+    // ---------------------------------------------------------------------
+    // Test Data Setup
+    // ---------------------------------------------------------------------
     @testSetup
     static void setupTestData() {
+
         Contact testContact = new Contact(
             FirstName = 'Test',
-            LastName = 'Contact',
-            Email = CONTACT_EMAIL
+            LastName  = 'Contact',
+            Email     = CONTACT_EMAIL
         );
         insert testContact;
 
-        Account testAccount = new Account(Name = 'Test Account');
+        Account testAccount = new Account(
+            Name = 'Test Account'
+        );
         insert testAccount;
 
         Opportunity testOpportunity = new Opportunity(
-            Name = 'Test Opportunity',
-            StageName = 'Prospecting',
-            CloseDate = Date.today().addDays(30),
-            AccountId = testAccount.Id
+            Name        = 'Test Opportunity',
+            StageName  = 'Prospecting',
+            CloseDate  = Date.today().addDays(30),
+            AccountId  = testAccount.Id
         );
         insert testOpportunity;
 
         Case testCase = new Case(
-            Subject = 'Test Case Subject',
-            Status = 'New',
-            Origin = 'Phone',
+            Subject   = 'Test Case Subject',
+            Status    = 'New',
+            Origin    = 'Phone',
             ContactId = testContact.Id,
             AccountId = testAccount.Id
         );
         insert testCase;
 
-        Case caseWithoutContact = new Case(
-            Subject = 'Case Without Contact',
-            Status = 'New',
-            Origin = 'Email',
-            AccountId = testAccount.Id
-        );
-        insert caseWithoutContact;
-
-        User runAsUser = [SELECT Id FROM User WHERE IsActive = true LIMIT 1];
+        User runAsUser = [
+            SELECT Id
+            FROM User
+            WHERE IsActive = true
+            LIMIT 1
+        ];
 
         System.runAs(runAsUser) {
+
             insert new EmailTemplate(
-                Name = 'Contact Lightning Template',
-                DeveloperName = 'Contact_Lightning_Template',
-                Subject = 'Hello {!Contact.FirstName}',
-                HtmlValue = '<html><body>Hello {!Contact.FirstName}</body></html>',
-                FolderId = UserInfo.getUserId(),
-                TemplateType = 'custom',
-                UiType = 'SFX',
+                Name              = 'Contact Lightning Template',
+                DeveloperName     = 'Contact_Lightning_Template',
+                Subject           = 'Hello World',
+                HtmlValue         = '<html><body>Hello World</body></html>',
+                FolderId          = UserInfo.getUserId(),
+                TemplateType      = 'custom',
+                UiType            = 'SFX',
                 RelatedEntityType = 'Contact',
-                IsActive = true
+                IsActive          = true
             );
 
             insert new EmailTemplate(
-                Name = 'Case Lightning Template',
-                DeveloperName = 'Case_Lightning_Template',
-                Subject = 'Case {!Case.CaseNumber}',
-                HtmlValue = '<html><body>Case {!Case.CaseNumber}</body></html>',
-                FolderId = UserInfo.getUserId(),
-                TemplateType = 'custom',
-                UiType = 'SFX',
+                Name              = 'Case Lightning Template',
+                DeveloperName     = 'Case_Lightning_Template',
+                Subject           = 'Case Update',
+                HtmlValue         = '<html><body>Case Update</body></html>',
+                FolderId          = UserInfo.getUserId(),
+                TemplateType      = 'custom',
+                UiType            = 'SFX',
                 RelatedEntityType = 'Case',
-                IsActive = true
+                IsActive          = true
             );
         }
     }
 
+    // ---------------------------------------------------------------------
+    // Template Retrieval
+    // ---------------------------------------------------------------------
     @IsTest
     static void testGetEmailTemplates() {
+
         Test.startTest();
-        List<OptionWrapper> templates = EmailTestController.getEmailTemplates();
+        List<OptionWrapper> templates =
+            EmailTestController.getEmailTemplates();
         Test.stopTest();
 
-        System.assertNotEquals(null, templates, 'Templates list should not be null.');
-        System.assert(templates.size() >= 2, 'Expected Lightning email templates to be returned.');
+        System.assertNotEquals(
+            null,
+            templates,
+            'Templates list should not be null.'
+        );
+        System.assert(
+            templates.size() >= 2,
+            'Expected Lightning email templates to be returned.'
+        );
 
         Set<String> labels = new Set<String>();
-        for (OptionWrapper item : templates) {
-            labels.add(item.label);
+        for (OptionWrapper wrapper : templates) {
+            labels.add(wrapper.label);
         }
 
         System.assert(
@@ -94,17 +110,22 @@ private class EmailTestControllerTest {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Template Target Object
+    // ---------------------------------------------------------------------
     @IsTest
     static void testGetTargetObjectTypeForCaseTemplate() {
+
         EmailTemplate caseTemplate = [
-            SELECT Id, RelatedEntityType
+            SELECT Id
             FROM EmailTemplate
             WHERE DeveloperName = 'Case_Lightning_Template'
             LIMIT 1
         ];
 
         Test.startTest();
-        String relatedType = EmailTestController.getTargetObjectType(caseTemplate.Id);
+        String relatedType =
+            EmailTestController.getTargetObjectType(caseTemplate.Id);
         Test.stopTest();
 
         System.assertEquals(
@@ -114,13 +135,21 @@ private class EmailTestControllerTest {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Record Retrieval
+    // ---------------------------------------------------------------------
     @IsTest
     static void testGetRecordsForOpportunityUsesName() {
+
         Test.startTest();
-        List<OptionWrapper> records = EmailTestController.getRecords('Opportunity');
+        List<OptionWrapper> records =
+            EmailTestController.getRecords('Opportunity');
         Test.stopTest();
 
-        System.assertNotEquals(0, records.size(), 'Opportunity records should be returned.');
+        System.assert(
+            records.size() > 0,
+            'Opportunity records should be returned.'
+        );
         System.assertEquals(
             'Test Opportunity',
             records[0].label,
@@ -130,40 +159,32 @@ private class EmailTestControllerTest {
 
     @IsTest
     static void testGetRecordsForCaseUsesCaseNumber() {
+
         Case existingCase = [
-            SELECT Id, CaseNumber
+            SELECT CaseNumber
             FROM Case
-            WHERE Subject = 'Test Case Subject'
             LIMIT 1
         ];
 
         Test.startTest();
-        List<OptionWrapper> records = EmailTestController.getRecords('Case');
+        List<OptionWrapper> records =
+            EmailTestController.getRecords('Case');
         Test.stopTest();
 
-        System.assertNotEquals(0, records.size(), 'Case records should be returned.');
-
-        Boolean foundMatchingCase = false;
-        for (OptionWrapper recordOption : records) {
-            if (recordOption.value == existingCase.Id) {
-                foundMatchingCase = true;
-                System.assertEquals(
-                    existingCase.CaseNumber,
-                    recordOption.label,
-                    'Case should use CaseNumber as the display label.'
-                );
-            }
-        }
-
+        System.assert(
+            records.size() > 0,
+            'Case records should be returned.'
+        );
         System.assertEquals(
-            true,
-            foundMatchingCase,
-            'The expected Case should be present in the returned options.'
+            existingCase.CaseNumber,
+            records[0].label,
+            'Case should use CaseNumber as the display label.'
         );
     }
 
     @IsTest
     static void testGetRecordsUnsupportedObjectThrowsHandledException() {
+
         Boolean exceptionThrown = false;
 
         Test.startTest();
@@ -185,8 +206,12 @@ private class EmailTestControllerTest {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Send Test Email – Contact
+    // ---------------------------------------------------------------------
     @IsTest
     static void testSendTestEmailToContactRecord() {
+
         EmailTemplate contactTemplate = [
             SELECT Id
             FROM EmailTemplate
@@ -217,8 +242,12 @@ private class EmailTestControllerTest {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Send Test Email – Case
+    // ---------------------------------------------------------------------
     @IsTest
-    static void testSendTestEmailToCaseRecordAllowsReviewerEmail() {
+    static void testSendTestEmailToCaseRecord() {
+
         EmailTemplate caseTemplate = [
             SELECT Id
             FROM EmailTemplate
@@ -229,7 +258,6 @@ private class EmailTestControllerTest {
         Case testCase = [
             SELECT Id
             FROM Case
-            WHERE Subject = 'Test Case Subject'
             LIMIT 1
         ];
 
@@ -237,7 +265,7 @@ private class EmailTestControllerTest {
         EmailTestController.sendTestEmail(
             caseTemplate.Id,
             testCase.Id,
-            REVIEW_EMAIL
+            CONTACT_EMAIL
         );
         Integer emailInvocations = Limits.getEmailInvocations();
         Test.stopTest();
@@ -245,12 +273,13 @@ private class EmailTestControllerTest {
         System.assertEquals(
             1,
             emailInvocations,
-            'One email invocation should occur for Case send to a reviewer email.'
+            'One email invocation should occur for Case send.'
         );
     }
 
     @IsTest
-    static void testSendTestEmailToCaseWithoutContactThrowsHandledException() {
+    static void testSendTestEmailToCaseWithoutMatchingContactThrowsHandledException() {
+
         EmailTemplate caseTemplate = [
             SELECT Id
             FROM EmailTemplate
@@ -258,10 +287,9 @@ private class EmailTestControllerTest {
             LIMIT 1
         ];
 
-        Case caseWithoutContact = [
+        Case testCase = [
             SELECT Id
             FROM Case
-            WHERE Subject = 'Case Without Contact'
             LIMIT 1
         ];
 
@@ -271,14 +299,16 @@ private class EmailTestControllerTest {
         try {
             EmailTestController.sendTestEmail(
                 caseTemplate.Id,
-                caseWithoutContact.Id,
-                REVIEW_EMAIL
+                testCase.Id,
+                MISSING_EMAIL
             );
         } catch (AuraHandledException ex) {
             exceptionThrown = true;
             System.assert(
-                ex.getMessage().contains('does not have a Contact'),
-                'Expected missing Case Contact message.'
+                ex.getMessage().contains(
+                    'A valid Contact with the given email address is required'
+                ),
+                'Expected missing Contact message.'
             );
         }
         Test.stopTest();
@@ -286,7 +316,7 @@ private class EmailTestControllerTest {
         System.assertEquals(
             true,
             exceptionThrown,
-            'An AuraHandledException should be thrown when the Case has no Contact.'
+            'An AuraHandledException should be thrown when no matching Contact exists.'
         );
     }
 }
